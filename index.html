@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blockchain e-Voting dApp</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load ethers.js -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js" type="application/javascript"></script>
+    <style>
+        /* Custom styles */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .admin-panel {
+            background: #fff;
+            border: 2px dashed #e2e8f0;
+        }
+        .status-box {
+            min-height: 100px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-900">
+
+    <!-- Header -->
+    <header class="bg-white shadow-md">
+        <nav class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-blue-600">SecureVote dApp</h1>
+            <button id="connectWalletBtn" class="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition duration-300">
+                Connect Wallet
+            </button>
+        </nav>
+        <div id="walletInfo" class="container mx-auto px-6 py-2 text-sm text-gray-600 hidden">
+            <p><strong>Status:</strong> <span id="connectionStatus" class="font-mono">Not Connected</span></p>
+            <p><strong>Account:</strong> <span id="accountAddress" class="font-mono">N/A</span></p>
+            <p><strong>Role:</strong> <span id="accountRole" class="font-mono">N/A</span></p>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-6 py-8">
+
+        <!-- Status Box -->
+        <div id="statusBox" class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded-lg mb-6 status-box" role="alert">
+            <p class="font-bold">Welcome!</p>
+            <p id="statusMessage">Please connect your MetaMask wallet to interact with the dApp.</p>
+        </div>
+
+        <!-- Admin Panel (Visible to Owner Only) -->
+        <section id="adminPanel" class="admin-panel p-6 rounded-lg shadow-sm mb-8 hidden">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">Admin Panel</h2>
+            <div class="grid md:grid-cols-2 gap-6">
+                <!-- Add Candidate -->
+                <div>
+                    <h3 class="font-semibold mb-2">Add New Candidate</h3>
+                    <div class="flex">
+                        <input type="text" id="candidateName" placeholder="Candidate Name" class="flex-grow p-2 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <button id="addCandidateBtn" class="bg-green-600 text-white font-semibold p-2 px-4 rounded-r-lg hover:bg-green-700">
+                            Add
+                        </button>
+                    </div>
+                </div>
+                <!-- Register Voter -->
+                <div>
+                    <h3 class="font-semibold mb-2">Register Voter</h3>
+                    <div class="flex">
+                        <input type="text" id="voterAddress" placeholder="0x... Voter Address" class="flex-grow p-2 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <button id="registerVoterBtn" class="bg-green-600 text-white font-semibold p-2 px-4 rounded-r-lg hover:bg-green-700">
+                            Register
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Candidate List / Voting Section -->
+        <section id="votingSection">
+            <h2 class="text-2xl font-bold mb-6">Candidates on the Ballot</h2>
+            <div id="candidatesList" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Candidate cards will be dynamically inserted here -->
+                <p id="noCandidates" class="text-gray-500">No candidates have been added yet.</p>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- JavaScript Application Logic -->
+    <script type="module">
+        // --- Contract Configuration ---
+        
+        // !!! IMPORTANT !!!
+        // 1. Deploy your `Voting.sol` contract (e.g., using Remix on Sepolia testnet).
+        // 2. Copy the deployed contract's address here.
+        const CONTRACT_ADDRESS = "0x1b1a419B067e73250004cFd559146b18e6A0206B"; // <-- PASTE YOUR ADDRESS
+
+        // The Application Binary Interface (ABI) for the Voting contract.
+        // This tells ethers.js how to interact with the contract's functions.
+        const CONTRACT_ABI = [
+            // --- Auto-generated Getters (for public variables) ---
+            { "inputs": [], "name": "owner", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" },
+            { "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "name": "candidates", "outputs": [{ "internalType": "string", "name": "name", "type": "string" }, { "internalType": "uint256", "name": "voteCount", "type": "uint256" }], "stateMutability": "view", "type": "function" },
+            { "inputs": [{ "internalType": "address", "name": "", "type": "address" }], "name": "voters", "outputs": [{ "internalType": "bool", "name": "isRegistered", "type": "bool" }, { "internalType": "bool", "name": "hasVoted", "type": "bool" }, { "internalType": "uint256", "name": "vote", "type": "uint256" }], "stateMutability": "view", "type": "function" },
+
+            // --- Custom Functions ---
+            { "inputs": [{ "internalType": "string", "name": "_name", "type": "string" }], "name": "addCandidate", "outputs": [], "stateMutability": "nonpayable", "type": "function" },
+            { "inputs": [{ "internalType": "address", "name": "_voterAddress", "type": "address" }], "name": "registerVoter", "outputs": [], "stateMutability": "nonpayable", "type": "function" },
+            { "inputs": [{ "internalType": "uint256", "name": "_candidateId", "type": "uint256" }], "name": "vote", "outputs": [], "stateMutability": "nonpayable", "type": "function" },
+            { "inputs": [], "name": "getAllCandidates", "outputs": [{ "components": [{ "internalType": "string", "name": "name", "type": "string" }, { "internalType": "uint256", "name": "voteCount", "type": "uint256" }], "internalType": "struct Voting.Candidate[]", "name": "", "type": "tuple[]" }], "stateMutability": "view", "type": "function" },
+            { "inputs": [{ "internalType": "address", "name": "_voterAddress", "type": "address" }], "name": "getVoter", "outputs": [{ "components": [{ "internalType": "bool", "name": "isRegistered", "type": "bool" }, { "internalType": "bool", "name": "hasVoted", "type": "bool" }, { "internalType": "uint256", "name": "vote", "type": "uint256" }], "internalType": "struct Voting.Voter", "name": "", "type": "tuple" }], "stateMutability": "view", "type": "function" },
+
+            // --- Events ---
+            { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "uint256", "name": "candidateId", "type": "uint256" }, { "indexed": false, "internalType": "string", "name": "name", "type": "string" }], "name": "CandidateAdded", "type": "event" },
+            { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "voter", "type": "address" }, { "indexed": true, "internalType": "uint256", "name": "candidateId", "type": "uint256" }], "name": "VoteCast", "type": "event" },
+            { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "voter", "type": "address" }], "name": "VoterRegistered", "type": "event" }
+        ];
+
+        // --- Global Variables ---
+        let provider;
+        let signer;
+        let contract;
+        let contractWithSigner;
+        let userAddress;
+        let contractOwner;
+
+        // --- DOM Elements ---
+        const connectWalletBtn = document.getElementById('connectWalletBtn');
+        const walletInfo = document.getElementById('walletInfo');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const accountAddress = document.getElementById('accountAddress');
+        const accountRole = document.getElementById('accountRole');
+        const statusBox = document.getElementById('statusBox');
+        const statusMessage = document.getElementById('statusMessage');
+        const adminPanel = document.getElementById('adminPanel');
+        const addCandidateBtn = document.getElementById('addCandidateBtn');
+        const candidateNameInput = document.getElementById('candidateName');
+        const registerVoterBtn = document.getElementById('registerVoterBtn');
+        const voterAddressInput = document.getElementById('voterAddress');
+        const candidatesList = document.getElementById('candidatesList');
+        const noCandidates = document.getElementById('noCandidates');
+        
+        // --- Initialization ---
+        
+        window.addEventListener('load', () => {
+            if (CONTRACT_ADDRESS === "0x...YOUR_CONTRACT_ADDRESS_HERE") {
+                showStatus("ERROR: `CONTRACT_ADDRESS` is not set. Please edit `index.html` and paste your deployed contract's address.", "error");
+                return;
+            }
+            connectWalletBtn.addEventListener('click', connectWallet);
+            addCandidateBtn.addEventListener('click', addCandidate);
+            registerVoterBtn.addEventListener('click', registerVoter);
+            
+            // Check if MetaMask is already connected
+            if (window.ethereum) {
+                // Add listeners for account or network changes
+                window.ethereum.on('accountsChanged', (accounts) => {
+                    if (accounts.length > 0) {
+                        connectWallet();
+                    } else {
+                        resetApp();
+                    }
+                });
+                window.ethereum.on('chainChanged', () => {
+                    connectWallet();
+                });
+            }
+        });
+
+        // --- Core Functions ---
+
+        /**
+         * Connects to the user's MetaMask wallet.
+         */
+        async function connectWallet() {
+            if (typeof window.ethereum === 'undefined') {
+                showStatus("MetaMask is not installed. Please install it to use this dApp.", "error");
+                return;
+            }
+
+            try {
+                // Request account access
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                userAddress = accounts[0];
+
+                // Initialize provider and signer
+                provider = new ethers.providers.Web3Provider(window.ethereum);
+                signer = provider.getSigner();
+
+                // Initialize contract instances
+                contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
+                contractWithSigner = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+
+                // Update UI
+                connectWalletBtn.textContent = 'Wallet Connected';
+                walletInfo.classList.remove('hidden');
+                connectionStatus.textContent = 'Connected';
+                accountAddress.textContent = `${userAddress.substring(0, 6)}...${userAddress.substring(userAddress.length - 4)}`;
+                
+                showStatus("Wallet connected. Loading contract data...", "success");
+
+                // Load initial application state
+                await loadContractData();
+
+            } catch (error) {
+                console.error("Error connecting wallet:", error);
+                showStatus(`Error connecting wallet: ${error.message}`, "error");
+                resetApp();
+            }
+        }
+
+        /**
+         * Resets the application UI to its initial state.
+         */
+        function resetApp() {
+            connectWalletBtn.textContent = 'Connect Wallet';
+            walletInfo.classList.add('hidden');
+            connectionStatus.textContent = 'Not Connected';
+            accountAddress.textContent = 'N/A';
+            accountRole.textContent = 'N/A';
+            adminPanel.classList.add('hidden');
+            userAddress = null;
+            showStatus("Please connect your MetaMask wallet to interact with the dApp.", "info");
+        }
+
+        /**
+         * Loads contract owner, voter status, and candidate list.
+         */
+        async function loadContractData() {
+            try {
+                // 1. Get Contract Owner
+                contractOwner = await contract.owner();
+                
+                // 2. Check User's Role
+                let voterStatus = await contract.getVoter(userAddress);
+                let role = "Guest";
+                if (userAddress.toLowerCase() === contractOwner.toLowerCase()) {
+                    role = "Admin / Owner";
+                    adminPanel.classList.remove('hidden');
+                } else if (voterStatus.isRegistered) {
+                    role = `Registered Voter (${voterStatus.hasVoted ? 'Voted' : 'Not Voted'})`;
+                }
+                accountRole.textContent = role;
+
+                // 3. Load Candidates
+                await loadCandidates(voterStatus);
+                
+                // 4. Set up event listeners
+                setupEventListeners();
+
+            } catch (error) {
+                console.error("Error loading contract data:", error);
+                showStatus(`Error loading contract data: ${error.message}. Is the contract address correct and deployed on this network?`, "error");
+            }
+        }
+
+        /**
+         * Fetches the candidate list and renders it to the page.
+         */
+        async function loadCandidates(voterStatus) {
+            try {
+                const candidates = await contract.getAllCandidates();
+                candidatesList.innerHTML = ''; // Clear existing list
+
+                if (candidates.length === 0) {
+                    noCandidates.classList.remove('hidden');
+                    return;
+                }
+                
+                noCandidates.classList.add('hidden');
+
+                // Check if voting is allowed for this user
+                const canVote = voterStatus.isRegistered && !voterStatus.hasVoted;
+                
+                candidates.forEach((candidate, index) => {
+                    const candidateCard = `
+                        <div class="bg-white p-6 rounded-lg shadow-md flex flex-col justify-between">
+                            <div>
+                                <h3 class="text-xl font-bold">${candidate.name}</h3>
+                                <p class="text-gray-600 mt-2">Total Votes: <span class="font-bold text-2xl text-blue-600">${candidate.voteCount.toString()}</span></p>
+                            </div>
+                            <button 
+                                data-id="${index}" 
+                                class="vote-btn mt-6 w-full py-2 px-4 rounded-lg text-white font-semibold transition duration-300 ${canVote ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'}"
+                                ${!canVote ? 'disabled' : ''}
+                            >
+                                ${canVote ? `Vote for ${candidate.name}` : (voterStatus.hasVoted ? (voterStatus.vote.toNumber() === index ? 'Your Vote' : 'Vote') : 'Not Registered')}
+                            </button>
+                        </div>
+                    `;
+                    candidatesList.innerHTML += candidateCard;
+                });
+
+                // Add event listeners to the new vote buttons
+                document.querySelectorAll('.vote-btn').forEach(button => {
+                    if (canVote) {
+                        button.addEventListener('click', handleVote);
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error loading candidates:", error);
+                showStatus(`Error loading candidates: ${error.message}`, "error");
+            }
+        }
+
+        /**
+         * Sets up blockchain event listeners to auto-update the UI.
+         */
+        function setupEventListeners() {
+            contract.on("VoteCast", (voter, candidateId) => {
+                showStatus(`New vote cast by ${voter} for candidate ${candidateId}! Reloading results...`, "success");
+                loadContractData(); // Reload all data
+            });
+
+            contract.on("CandidateAdded", (candidateId, name) => {
+                showStatus(`New candidate "${name}" added! Reloading list...`, "success");
+                loadContractData(); // Reload all data
+            });
+
+            contract.on("VoterRegistered", (voter) => {
+                showStatus(`New voter ${voter} registered!`, "info");
+                if (voter === userAddress) {
+                    loadContractData(); // Reload data if it's the current user
+                }
+            });
+        }
+
+        // --- Transaction Functions ---
+
+        /**
+         * Handles the click event for the "Add Candidate" button.
+         */
+        async function addCandidate() {
+            const name = candidateNameInput.value;
+            if (!name) {
+                showStatus("Please enter a candidate name.", "error");
+                return;
+            }
+            
+            showStatus(`Adding candidate "${name}"... Please wait for transaction.`, "info");
+            
+            try {
+                const tx = await contractWithSigner.addCandidate(name);
+                await tx.wait(); // Wait for the transaction to be mined
+                
+                showStatus(`Candidate "${name}" added successfully!`, "success");
+                candidateNameInput.value = ''; // Clear input
+                // The event listener will automatically refresh the candidate list.
+            } catch (error) {
+                console.error("Error adding candidate:", error);
+                showStatus(`Error adding candidate: ${error.message}`, "error");
+            }
+        }
+
+        /**
+         * Handles the click event for the "Register Voter" button.
+         */
+        async function registerVoter() {
+            const address = voterAddressInput.value;
+            if (!ethers.utils.isAddress(address)) {
+                showStatus("Invalid Ethereum address.", "error");
+                return;
+            }
+
+            showStatus(`Registering voter ${address}... Please wait for transaction.`, "info");
+
+            try {
+                const tx = await contractWithSigner.registerVoter(address);
+                await tx.wait(); // Wait for the transaction to be mined
+
+                showStatus(`Voter ${address} registered successfully!`, "success");
+                voterAddressInput.value = ''; // Clear input
+            } catch (error) {
+                console.error("Error registering voter:", error);
+                showStatus(`Error registering voter: ${error.message}`, "error");
+            }
+        }
+
+        /**
+         * Handles the click event for a "Vote" button.
+         */
+        async function handleVote(event) {
+            const candidateId = event.target.dataset.id;
+            const candidateName = event.target.textContent.replace('Vote for ', '');
+            
+            if (confirm(`Are you sure you want to vote for ${candidateName}? This action is irreversible.`)) {
+                showStatus(`Casting vote for ${candidateName} (ID: ${candidateId})... Please confirm in MetaMask.`, "info");
+                
+                try {
+                    const tx = await contractWithSigner.vote(candidateId);
+                    showStatus("Vote transaction sent. Waiting for confirmation...", "info");
+                    
+                    await tx.wait(); // Wait for the transaction to be mined
+                    
+                    showStatus(`You have successfully voted for ${candidateName}!`, "success");
+                    // The event listener will automatically refresh the UI.
+                } catch (error) {
+                    console.error("Error casting vote:", error);
+                    showStatus(`Error casting vote: ${error.message}`, "error");
+                }
+            }
+        }
+
+        // --- Utility Functions ---
+
+        /**
+         * Displays a message in the status box.
+         */
+        function showStatus(message, type = "info") {
+            statusMessage.textContent = message;
+            statusBox.className = 'p-4 rounded-lg mb-6 status-box'; // Reset classes
+            
+            let typeClasses = 'bg-blue-100 border-l-4 border-blue-500 text-blue-700';
+            if (type === "success") {
+                typeClasses = 'bg-green-100 border-l-4 border-green-500 text-green-700';
+            } else if (type === "error") {
+                typeClasses = 'bg-red-100 border-l-4 border-red-500 text-red-700';
+            }
+            
+            statusBox.classList.add(...typeClasses.split(' '));
+        }
+
+    </script>
+</body>
+</html>
